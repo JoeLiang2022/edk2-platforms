@@ -102,11 +102,27 @@ CIRRUS_LOGIC_5430_VIDEO_MODES  CirrusLogic5430VideoModes[] = {
 
 
 /**
-  CirrusLogic5430ControllerDriverSupported
+  Test to see if this driver supports a given controller. If a child device node is returned,
+  it then gets added as a child of the controller.
 
-  TODO:    This - add argument and description to function comment
-  TODO:    Controller - add argument and description to function comment
-  TODO:    RemainingDevicePath - add argument and description to function comment
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              The handle of the controller to test.
+  @param  RemainingDevicePath     A pointer to the remaining portion of a device path.  This
+                                  parameter is ignored by device drivers, and is optional for
+                                  bus drivers. For bus drivers, if this parameter is not NULL,
+                                  then the bus driver must determine if the bus controller on
+                                  a given handle can support a child controller on the device path
+                                  that is being probed.
+
+  @retval EFI_SUCCESS             The device specified by ControllerHandle and RemainingDevicePath is
+                                  supported by the driver specified by This.
+  @retval EFI_ALREADY_STARTED     The device specified by ControllerHandle and RemainingDevicePath is
+                                  already being managed by the driver specified by This.
+  @retval EFI_ACCESS_DENIED       The device specified by ControllerHandle and RemainingDevicePath is
+                                  already being managed by a different driver or an application that
+                                  requires exclusive access. Currently not implemented.
+  @retval EFI_UNSUPPORTED         The device specified by ControllerHandle and RemainingDevicePath is
+                                  not supported by the driver specified by This.
 **/
 EFI_STATUS
 EFIAPI
@@ -208,11 +224,24 @@ Done:
 }
 
 /**
-  CirrusLogic5430ControllerDriverStart
+  Start this driver on ControllerHandle by opening the PCI I/O protocol for the
+  Cirrus Logic 5430 controller and producing a graphics output protocol.
 
-  TODO:    This - add argument and description to function comment
-  TODO:    Controller - add argument and description to function comment
-  TODO:    RemainingDevicePath - add argument and description to function comment
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              The handle of the controller to start. This is the handle
+                                  passed to the Entry Point(eg. ImageHandle) is added as a new
+                                  child via InstallMultipleProtocolInterfaces().
+  @param  RemainingDevicePath     A pointer to the remaining portion of a device path.  This
+                                  parameter is ignored by device drivers, and is optional for
+                                  bus drivers. For bus drivers, if this parameter is not NULL,
+                                  then the bus driver must determine if the bus controller on
+                                  a given handle can support a child controller on the device path
+                                  that is being probed.
+
+  @retval EFI_SUCCESS             Driver is started successfully.
+  @retval EFI_OUT_OF_RESOURCES    Failed to allocate required memory or resources.
+  @retval EFI_DEVICE_ERROR        A device error occurred.
+  @retval EFI_UNSUPPORTED         The device is not supported.
 **/
 EFI_STATUS
 EFIAPI
@@ -426,13 +455,21 @@ Error:
 }
 
 /**
-  CirrusLogic5430ControllerDriverStop
+  Stop this driver on ControllerHandle by removing the graphics output protocol and closing
+  the PCI I/O protocol for the Cirrus Logic 5430 controller.
 
-  TODO:    This - add argument and description to function comment
-  TODO:    Controller - add argument and description to function comment
-  TODO:    NumberOfChildren - add argument and description to function comment
-  TODO:    ChildHandleBuffer - add argument and description to function comment
-  TODO:    EFI_SUCCESS - add return value to function comment
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              A handle to the device being stopped. The handle must
+                                  support a bus specific I/O abstraction if the driver chooses
+                                  to stop only a subset of the children.  This parameter is
+                                  compared to the ControllerHandle on the installed
+                                  DriverBindingProtocol. It is the same as ControllerHandle.
+  @param  NumberOfChildren        The number of child device handles in ChildHandleBuffer.
+  @param  ChildHandleBuffer       An array of child handles to be freed. This parameter
+                                  is ignored if NumberOfChildren is zero.
+
+  @retval EFI_SUCCESS             Driver is stopped successfully.
+  @retval EFI_DEVICE_ERROR        A device error occurred.
 **/
 EFI_STATUS
 EFIAPI
@@ -509,13 +546,11 @@ CirrusLogic5430ControllerDriverStop (
 }
 
 /**
-  TODO: Add function description
+  Write an 8-bit value to a Cirrus Logic 5430 I/O port.
 
-  @param  Private TODO: add argument description
-  @param  Address TODO: add argument description
-  @param  Data TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Address                 The I/O port address to write to.
+  @param  Data                    The 8-bit value to write.
 
 **/
 VOID
@@ -536,13 +571,11 @@ outb (
 }
 
 /**
-  TODO: Add function description
+  Write a 16-bit value to a Cirrus Logic 5430 I/O port.
 
-  @param  Private TODO: add argument description
-  @param  Address TODO: add argument description
-  @param  Data TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Address                 The I/O port address to write to.
+  @param  Data                    The 16-bit value to write.
 
 **/
 VOID
@@ -563,12 +596,12 @@ outw (
 }
 
 /**
-  TODO: Add function description
+  Read an 8-bit value from a Cirrus Logic 5430 I/O port.
 
-  @param  Private TODO: add argument description
-  @param  Address TODO: add argument description
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Address                 The I/O port address to read from.
 
-  TODO: add return values
+  @return The 8-bit value read from the I/O port.
 
 **/
 UINT8
@@ -591,12 +624,12 @@ inb (
 }
 
 /**
-  TODO: Add function description
+  Read a 16-bit value from a Cirrus Logic 5430 I/O port.
 
-  @param  Private TODO: add argument description
-  @param  Address TODO: add argument description
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Address                 The I/O port address to read from.
 
-  TODO: add return values
+  @return The 16-bit value read from the I/O port.
 
 **/
 UINT16
@@ -619,15 +652,13 @@ inw (
 }
 
 /**
-  TODO: Add function description
+  Set a single entry in the Cirrus Logic 5430 DAC palette.
 
-  @param  Private TODO: add argument description
-  @param  Index TODO: add argument description
-  @param  Red TODO: add argument description
-  @param  Green TODO: add argument description
-  @param  Blue TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Index                   The palette entry index (0-255) to set.
+  @param  Red                     The red component value (0-255) to set in the palette.
+  @param  Green                   The green component value (0-255) to set in the palette.
+  @param  Blue                    The blue component value (0-255) to set in the palette.
 
 **/
 VOID
@@ -646,11 +677,9 @@ SetPaletteColor (
 }
 
 /**
-  TODO: Add function description
+  Initialize the Cirrus Logic 5430 DAC palette to a default 3-3-2 color palette.
 
-  @param  Private TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
 
 **/
 VOID
@@ -675,11 +704,9 @@ SetDefaultPalette (
 }
 
 /**
-  TODO: Add function description
+  Clear the Cirrus Logic 5430 display by filling the first 1 MiB of the framebuffer with zeros.
 
-  @param  Private TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
 
 **/
 VOID
@@ -701,11 +728,12 @@ ClearScreen (
 }
 
 /**
-  TODO: Add function description
+  Draw a logo on the Cirrus Logic 5430 display. This sample driver does not implement
+  logo drawing; this function is provided as a placeholder for future extension.
 
-  @param  Private TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  ScreenWidth             The width of the display screen in pixels.
+  @param  ScreenHeight            The height of the display screen in pixels.
 
 **/
 VOID
@@ -718,12 +746,13 @@ DrawLogo (
 }
 
 /**
-  TODO: Add function description
+  Initialize the Cirrus Logic 5430 controller to a graphics mode specified by ModeData.
+  This sets up CRTC, sequencer, and miscellaneous registers, then loads the default
+  palette and clears the screen.
 
-  @param  Private TODO: add argument description
-  @param  ModeData TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  ModeData                Pointer to the graphics mode data containing CRTC,
+                                  sequencer, and miscellaneous register settings.
 
 **/
 VOID
