@@ -1,189 +1,386 @@
 # 專案架構
 
-> 評估情境：使用 **AMD Ryzen Embedded V3000** 當控制 CPU，**Broadcom Tomahawk 5 (TH5)** switch ASIC 掛在 PCIe 下；由 CPU 透過 PCIe 管理 switch，而非 CPU 內建 switch。本文件判斷 edk2-platforms 是否支援這種架構，並描述 repo 的實際組織，供後續 AI 規劃/開發/審查依循。
+> 目標產品：以 **AMD Ryzen Embedded V3000**（x86 控制 CPU）+ **Broadcom Tomahawk 5 (TH5)** switch ASIC（掛在 PCIe 下）組成的管理型乙太網路交換器。本文件（1）判斷 edk2-platforms 是否適用、（2）給出要在本 repo 建立的**新程式架構**、（3）列出**所有要新增/修改的功能工單**供 GitHub 審查。
+
+---
 
 ## 1. 概觀
 
-### 這是什麼
-TianoCore **`edk2-platforms`**（見根目錄 `Readme.md`），屬 UEFI/EDK II 開源韌體專案，內容是 **各家 SoC/主機板的 UEFI (BIOS) 韌體原始碼**，必須搭配 [`edk2`](https://github.com/tianocore/edk2) 核心 repo 與（可選）`edk2-non-osi` 建置。
+### 1.1 這個 repo 是什麼
+TianoCore **`edk2-platforms`**（見根目錄 `Readme.md`）：UEFI/EDK II 開源韌體原始碼樹，須搭配 `edk2` 與（可選）`edk2-non-osi`。它只處理 **BIOS/UEFI 階段**，不含任何 switch data/control plane；`grep -ri tomahawk|th5|trident` 在整個 repo **零命中**（Broadcom 目錄下只有樹莓派 Bcm27xx/283x SoC）。
 
-**它是**：UEFI PEI/DXE/SMM 模組、Library、Protocol、ACPI、FV 映像描述。
-
-**它不是**：
-- 不是網路交換器的 data-plane / control-plane 程式（沒有 FDB、VLAN、STP、LACP、ACL、QoS、switch SDK bindings）。
-- 不是 Linux-based NOS（SONiC/FBOSS）、也不是 switch ASIC SDK。
-- 不是 Broadcom Tomahawk 系列的任何驅動；`grep -ri tomahawk|th5|bcm5|trident` 在整個 repo **零結果**（只對應到 Broadcom Bcm27xx/283x 樹莓派 SoC，不是 switch ASIC）。
-
-### 對「V3000 + TH5 (PCIe)」的直接適用性判斷
+### 1.2 對本產品的適用性結論
 
 | 問題 | 結論 | 依據 |
 |---|---|---|
-| 這份 code 支援 CPU 經 PCIe 控制 switch ASIC（TH5）嗎？ | **不直接支援，也不需要在 UEFI 支援** | UEFI 階段只需把 TH5 當普通 PCIe endpoint 列舉（由 `edk2/MdeModulePkg/Bus/Pci/PciBusDxe` 完成），實際 switch 管理交給 OS 的 SDK/驅動。此 repo 內**沒有** TH5 或任何 managed-switch 驅動。 |
-| 有 AMD V3000（Ryzen Embedded, Mendocino/Phoenix 系）的現成平台包嗎？ | **沒有** | `grep -ri 'v3000\|v2000\|v1000\|mendocino\|phoenix\|rembrandt'` 在 `Platform/AMD` 與 `Silicon/AMD` 皆無命中。`Platform/AMD` 現有板只有 EPYC Server（Genoa SP5、Turin SP5）與 `XilinxBoard/ZynqMp`（見 `Platform/AMD/ServerBoard.md`）。 |
-| AGESA / PSP / Nbio 支援呢？ | 有 Server 版骨架 | `Platform/AMD/AgesaModulePkg/{Nbio,Psp,Fch,…}` 但目前 upstream 放的是 **NULL instance**；實際可開機的 AGESA 要向 AMD 取得（見 `Platform/AMD/ServerBoard.md`「Server boards edk2 build」一節）。V3000 需要的是 Client/Embedded AGESA，上游沒有。 |
-| UEFI 期要透過 TH5 的管理口做 PXE/HTTP boot 嗎？ | 可選；若要，走 PCIe NIC 標準路徑 | 參考 `Drivers/OptionRomPkg/UndiRuntimeDxe/`（UNDI 範例）與 `Drivers/ASIX/.../Ax88179/SimpleNetwork.c`。Switch ASIC 本身的管理介面通常是 OOB，不走 UEFI。 |
-| 控制面（FDB、VLAN、STP、SNMP、CLI）放哪？ | **不在 UEFI、不在此 repo** | 這些由 Linux + NOS（SONiC/ONL/自研）在 OS 層做，透過 Broadcom SDK（非開源，需向 Broadcom 取得）操作 TH5。 |
+| 支援「CPU 經 PCIe 控管 switch ASIC」嗎？ | **UEFI 層這樣做就對，且 repo 已足夠** | TH5 在 UEFI 只是 PCIe endpoint，由上游 `edk2/MdeModulePkg/Bus/Pci/PciBusDxe` 自動列舉；平台提供 `PciHostBridgeLib` 宣告 root bridge 即可。 |
+| 有 V3000 現成 Board Pkg 嗎？ | **沒有，需自建** | `grep -ri 'v3000\|mendocino\|phoenix\|rembrandt'` 於 `Platform/AMD` 與 `Silicon/AMD` 皆零命中。現有僅 EPYC Server（Genoa SP5、Turin SP5，見 `Platform/AMD/ServerBoard.md`）與 `XilinxBoard/ZynqMp`。 |
+| AGESA 支援？ | **upstream 是 NULL instance，正式 PI 需向 AMD 取得** | `Platform/AMD/ServerBoard.md` 明載。V3000 需 Embedded/Client PI，不同於 SP5 的 EPYC PI。 |
+| switch 管理（FDB/VLAN/STP…）要在哪？ | **不在 UEFI、不在此 repo** | 由 OS/NOS + Broadcom SDK 執行；UEFI 只負責讓 OS 能看見 TH5。 |
 
-**結論**：edk2-platforms **可以作為 V3000 控制板的 UEFI 層**，但需要「自行新增一個 Ryzen Embedded 的 Board Pkg（copy 自最接近的 AMD 參考板 + 向 AMD 索取對應 Embedded AGESA）」。對 TH5 本身**不需也不應**在此 repo 動手；UEFI 只需做好 PCIe 列舉與 MMIO/中斷資源分配即可。
-
-### 技術棧 / 語言
-- 主要語言：C（UEFI Driver Model）、ACPI ASL、少量組語、Python（build 工具在外部 `edk2/BaseTools`）。
-- 建置系統：EDK II `build`，透過 `.dec`（宣告）、`.dsc`（平台描述）、`.fdf`（Flash 映像）、`.inf`（模組）組織。
-- 目標架構：AARCH64、X64、IA32、RISCV64、LOONGARCH64（`Readme.md`）；V3000 走 **X64**。
-
-### 目錄一覽（頂層，實際存在）
-```
-/Platform/   各家主機板平台包
-  AMD/      AgesaModulePkg, AgesaPkg, AmdCbsPkg, AmdCpmPkg,
-            AmdMinBoardPkg, AmdPlatformPkg,
-            GenoaBoard/{Cinnabar,Onyx,Quartz,Ruby,Shale,Sunstone,Titanite,…}BoardPkg,
-            TurinBoard/{Chalupa,Galena,Onyx,Purico,Quartz,Ruby,Titanite,Volcano,Emulation}BoardPkg,
-            XilinxBoard/ZynqMp
-  其他：96Boards, ADLINK, ARM, ASRockRack, Ampere, Bosc, Intel, Loongson,
-       Marvell, MinPlatformPkg, NXP, Phytium, Qemu, Qualcomm, RISC-V,
-       RaspberryPi, SiFive, SolidRun, Sophgo, StandaloneMm
-/Silicon/    SoC/晶片共用：AMD(Xilinx), ARM, Ampere, Atmel, Bosc, Broadcom
-             (Bcm27xx/Bcm283x — 樹莓派, 非 switch ASIC), Intel, Marvell,
-             Maxim, NXP, Openmoko, Phytium, Qemu, Qualcomm, RISC-V,
-             SiFive, Sophgo, Synopsys
-/Drivers/    通用 UEFI 驅動：ASIX(USB NIC), DisplayLink(GOP), OpTee,
-             OptionRomPkg(ATAPI, FTDI, UNDI, CirrusLogic, Renesas FW…)
-/Features/   選用功能包：Ext4Pkg,
-             Intel/{AdvancedFeaturePkg, Debugging/*, Network/NetworkFeaturePkg,
-                    OutOfBandManagement/(Asf,Ipmi,Spcr),
-                    PlatformPayloadFeaturePkg, PowerManagement/S3,
-                    SystemInformation/SmbiosFeaturePkg,
-                    UserInterface/(Logo,UserAuth,VirtualKeyboard)}
-/CODEOWNERS, /REVIEWERS, /CONTRIBUTORS.md
-/License.txt, /License-History.txt   BSD-2-Clause-Patent
-/Readme.md                           建置與貢獻說明
-```
-無頂層 `tests/`、`ci/`、`package.json`：**本 repo 無獨立測試或 CI**，驗證走外部 `edk2` 工具。
-
-### 建置 / 測試 / Lint / 型別檢查指令
-
-> 以下路徑與指令與 `Readme.md`、`Platform/AMD/ServerBoard.md` 實際對齊。
-
+### 1.3 建置 / 測試 / Lint / 型別檢查指令（確認可跑的）
 ```bash
-# 1) 準備 workspace
 mkdir -p $WORKSPACE && cd $WORKSPACE
 git clone https://github.com/tianocore/edk2.git
 git -C edk2 submodule update --init
 git clone https://github.com/tianocore/edk2-platforms.git
 git clone https://github.com/tianocore/edk2-non-osi.git
-
-# 2) PACKAGES_PATH（Linux 範例，AMD 板子還要加 Platform/AMD 子樹）
-export PACKAGES_PATH=$PWD/edk2:$PWD/edk2-platforms:$PWD/edk2-non-osi
-
-# 3) 建置環境與 BaseTools
+export PACKAGES_PATH=$PWD/edk2:$PWD/edk2-platforms:$PWD/edk2-non-osi:\
+$PWD/edk2-platforms/Platform/AMD:\
+$PWD/edk2-platforms/Platform/AMD/EmbeddedV3000Board
 . edk2/edksetup.sh
 make -C edk2/BaseTools
-
-# 4) 建置某平台（例：ARM Juno / AMD Turin Onyx）
-build -a AARCH64 -t GCC -p Platform/ARM/JunoPkg/ArmJuno.dsc
-# AMD 範例請看 Platform/AMD/ServerBoard.md 的 PACKAGES_PATH 與 .dsc 指令
+# 新板建置（本專案要新增）
+build -a X64 -t GCC -p Platform/AMD/EmbeddedV3000Board/Th5SwitchBoardPkg/Project.dsc
 ```
-輸出在 `Build/{PlatformName}/{TARGET}_{TOOLCHAIN}/FV`。交叉編譯設 `{TOOLCHAIN}_{ARCH}_PREFIX`，例如 `GCC_AARCH64_PREFIX=aarch64-linux-gnu-`。
+無 repo 層測試框架。靜態檢查靠外部 `edk2`：`PatchCheck.py`、`uncrustify`、ECC（皆**待設定**於本 repo CI）。
 
-**測試 / Lint / 型別檢查**：repo 內無；通用做法（來自上游 edk2，皆**待設定**於本 repo 的 CI）：
-- `python edk2/BaseTools/Scripts/PatchCheck.py` — 提交格式檢查。
-- `uncrustify` + EDK II 設定 — 程式碼格式。
-- ECC（`edk2/BaseTools/Source/Python/Ecc/`）— 命名/風格靜態檢查。
-- C/UEFI 無獨立型別檢查，倚賴 toolchain warning。
-
-## 2. 分層與依賴方向
-
-EDK II 透過 `.inf`（模組）→ `.dsc`（平台）→ `.fdf`（映像）描述，用 `LibraryClass` + `Protocol/Ppi/Guid` 解耦。各目錄職責與允許的依賴方向：
-
-| 目錄 | 職責 | 可以依賴 | 不可以依賴 |
-|---|---|---|---|
-| `Silicon/{Vendor}/...` | SoC 等級通用模組（Pkg、Library、Driver、Include） | 外部 `edk2/MdePkg`、`edk2/MdeModulePkg`；同 Vendor 其他 Silicon Pkg | `Platform/*`；其他 Vendor Silicon |
-| `Platform/{Vendor}/{Board}Pkg` | 具體主機板 `.dsc/.fdf`、板級 Library/Driver、ACPI | `Silicon/{Vendor}/*`、`Features/*`、`Drivers/*`、外部 edk2 | 其他 Vendor Platform；避免深度耦合特定晶片 |
-| `Platform/AMD/AgesaModulePkg` | AMD AGESA（記憶體/CCX/DF/FCH/NBIO/PSP…）封裝 | AgesaPkg、AmdCpmPkg | Board Pkg（反向禁止） |
-| `Platform/AMD/AmdMinBoardPkg`, `AmdPlatformPkg` | AMD 板級共用、MinPlatform 整合 | AgesaModulePkg、AgesaPkg | 具體 Board |
-| `Drivers/{Vendor 或 Generic}` | 與平台無關的可重用 UEFI 驅動 | 外部 edk2 標準協定 | `Platform/*`、`Silicon/*` |
-| `Features/{Category}/*FeaturePkg` | 可選功能（除錯、OOB 管理、SMBIOS、使用者認證…） | 外部 edk2；少數 Silicon 介面 | `Platform/*` |
-
-**核心規則**：Platform 依賴 Silicon/Drivers/Features；**反向嚴禁**。
-
-## 3. 資料流
-
-### 3.1 典型 UEFI 開機路徑（任一平台）
-1. `build -p Platform/{Vendor}/{Board}/XXX.dsc` 讀 `.dsc` 決定要編哪些模組。
-2. `.fdf` 把 SEC/PEI/DXE/BDS 模組與 FV 塞進 Flash 映像。
-3. 執行期：
-   - PEI：早期記憶體/CPU 初始化（AMD 走 AGESA PEI 模組，見 `Platform/AMD/AgesaModulePkg/`）。
-   - DXE：載入 `PciBusDxe`（來自上游 edk2）自動列舉 PCIe 樹；平台提供 `PciHostBridgeLib`（如 `Platform/AMD/AgesaModulePkg/Library/DxeAmdPciHostBridgeLib/PciHostBridgeLib.c`）告知 root bridge 範圍。
-   - BDS：UEFI Boot Manager 依 BootOrder 開機。
-
-### 3.2 本專案情境（V3000 + TH5）在 UEFI 的實際資料流
-
+### 1.4 目錄一覽（頂層，實際存在 + 本專案將新增）
 ```
-[開機]
-  └─ PEI: AGESA 初始化 V3000 的 DF/NBIO/UMC/PSP
-        （需要 AMD 提供 Embedded V3000 AGESA；upstream 是 NULL instance）
-  └─ DXE: PciHostBridgeLib 宣告 V3000 的 PCIe root bridge
-        └─ PciBusDxe 掃描 → 發現 TH5 (Broadcom VID/DID, Class=Network/Other)
-              └─ 分配 BAR/中斷 → 完成
-        └─ 管理網口若需 PXE：載入對應 PCIe NIC 的 UEFI driver（UNDI/SNP）
-  └─ BDS: 從 NVMe/USB/PXE 載入 Linux 或 NOS
-            └─ OS 載入 Broadcom SDK → 真正的 switch 初始化、FDB/VLAN/STP 設定
+/Platform/
+  AMD/
+    AgesaModulePkg/, AgesaPkg/, AmdCbsPkg/, AmdCpmPkg/
+    AmdMinBoardPkg/   ← MinPlatform 整合骨架（本專案要 inherit）
+    AmdPlatformPkg/   ← AMD 板級通用（DynamicTables, Library, Universal）
+    GenoaBoard/{Cinnabar,Onyx,Quartz,Ruby,Shale,Sunstone,Titanite,...}BoardPkg
+    TurinBoard/{Chalupa,Galena,Onyx,Purico,Quartz,Ruby,Titanite,Volcano,Emulation}BoardPkg
+    XilinxBoard/ZynqMp
+    [NEW] EmbeddedV3000Board/
+          └─ Th5SwitchBoardPkg/   ← 本專案主體
+  其餘：96Boards, ADLINK, ARM, ASRockRack, Ampere, Bosc, Intel, Loongson,
+       Marvell, MinPlatformPkg, NXP, Phytium, Qemu, Qualcomm, RISC-V,
+       RaspberryPi, SiFive, SolidRun, Sophgo, StandaloneMm
+/Silicon/
+  AMD/{Xilinx}
+  [NEW] AMD/EmbeddedV3000Pkg/   ← V3000 共用 Library/PciHostBridge（若未來多板共用）
+  Broadcom/{Bcm27xx, Bcm283x, Drivers}   ← 與 TH5 無關
+  其餘：ARM, Ampere, Atmel, Bosc, Intel, Marvell, Maxim, NXP, Openmoko,
+       Phytium, Qemu, Qualcomm, RISC-V, SiFive, Sophgo, Synopsys
+/Drivers/   ASIX, DisplayLink, OpTee, OptionRomPkg
+/Features/  Ext4Pkg, Intel/{AdvancedFeaturePkg, Debugging/*, Network/*,
+           OutOfBandManagement/(Asf,Ipmi,Spcr), PlatformPayloadFeaturePkg,
+           PowerManagement/S3, SystemInformation/Smbios, UserInterface/*}
+/CODEOWNERS, /REVIEWERS, /CONTRIBUTORS.md, /Readme.md, /License.txt
 ```
 
-**要點**：UEFI 期不會也不應該去 "programing TH5 switch core"；TH5 在這階段只是一個 PCIe 裝置，拿到資源就好。真正的 switch 管理在 OS 層發生。
+---
 
-## 4. 範本檔案（要新增某類東西時，照抄哪裡）
+## 2. 新程式架構（V3000 + TH5 Switch 控制板）
 
-| 要新增什麼 | 照抄哪個檔案 / 目錄 | 注意事項 |
+### 2.1 分層與新增目錄
+
+```
+Platform/AMD/EmbeddedV3000Board/Th5SwitchBoardPkg/   ← 板級（本專案主要輸出）
+├── Th5SwitchBoardPkg.dec        宣告 GUID / PCD
+├── Project.dsc                   平台描述（照抄 TurinBoard/OnyxBoardPkg/Project.dsc 精簡）
+├── Project.fdf                   Flash 映像佈局
+├── Include/
+│   ├── Dsc/ProjectPcd.dsc        PCD 覆寫（PCIe 範圍、TH5 bus/segment、GPIO…）
+│   └── Fdf/FlashMapInclude.fdf   SPI Flash map
+├── Library/
+│   ├── BoardInitLib/             板級硬體初始化（GPIO、clock、reset TH5）
+│   ├── PciHostBridgeLib/         V3000 PCIe root bridge 宣告（含 TH5 所在 segment）
+│   ├── PlatformHookLib/          UART / 偵錯埠
+│   └── BoardBdsHookLib/          BootOrder 客製（優先管理口 PXE）
+├── AcpiTables/
+│   ├── Dsdt/                     V3000 + TH5 的 DSDT（_DSD 描述 TH5 用途）
+│   ├── Ssdt/Th5.asl              TH5 的 ACPI 節點（PNP id、BAR、GPIO 中斷）
+│   └── Platform.aslc             MADT / MCFG / SPCR
+├── Drivers/
+│   ├── Th5PreInitDxe/            TH5 上電/重置序列（PERST#、SMBus EEPROM 讀取）
+│   └── BoardConfigDxe/           HII Setup 選單（管理口 MAC、PXE 開關）
+└── Binaries/                     AGESA Blob 占位（實際向 AMD 取得）
+
+Silicon/AMD/EmbeddedV3000Pkg/                        ← SoC 共用（若只做一塊板可省）
+├── EmbeddedV3000Pkg.dec
+├── Include/{Library,Ppi,Protocol}/
+└── Library/
+    ├── V3000NbioLib/             V3000 NBIO/PCIe 控制器參數
+    └── V3000FchLib/              V3000 FCH (南橋) 設定
+```
+
+### 2.2 分層依賴（單向，違反會被 CI 擋）
+
+```
+Platform/AMD/EmbeddedV3000Board/Th5SwitchBoardPkg
+   │ 依賴
+   ▼
+Silicon/AMD/EmbeddedV3000Pkg   Platform/AMD/AmdMinBoardPkg   Platform/AMD/AmdPlatformPkg
+   │                               │                            │
+   └──────────────┬────────────────┴────────────┬───────────────┘
+                  ▼                             ▼
+        Platform/AMD/AgesaModulePkg      Features/Intel/*FeaturePkg
+                  │                             │
+                  └─────────────┬───────────────┘
+                                ▼
+              edk2 (MdePkg, MdeModulePkg, NetworkPkg, SecurityPkg)
+```
+禁止方向：Silicon → Platform、Features → Platform、同層 Board 互相依賴。
+
+### 2.3 執行期資料流（UEFI 階段對 TH5 的處理）
+
+```
+SEC → PEI
+  ├─ AGESA PEI (V3000): CPU/DF/UMC/PSP/NBIO init  [需 AMD Embedded AGESA]
+  └─ BoardInitPeiLib: 板級 GPIO、PERST# 拉高、TH5 參考時脈 enable
+DXE
+  ├─ PciHostBridgeLib: 宣告 V3000 的 PCIe root bridges (含 TH5 segment)
+  ├─ edk2 PciBusDxe: 掃到 TH5 → 配 BAR / MSI-X
+  ├─ Th5PreInitDxe: 讀 SMBus EEPROM（SKU、MAC base）→ 塞進 HOB / PCD
+  ├─ (可選) UNDI/SNP: PCIe NIC for 管理口 PXE
+  └─ ACPI 安裝: DSDT/SSDT 描述 TH5 (_HID, _CRS, _DSD)
+BDS
+  └─ 依 BootOrder 載 Linux/NOS → OS 的 Broadcom SDK 接手 TH5
+```
+
+### 2.4 要照抄的現成檔案
+
+| 要新增什麼 | 照抄哪個檔案 | 注意事項 |
 |---|---|---|
-| **V3000 新主機板（最相關）** | 先 copy `Platform/AMD/TurinBoard/OnyxBoardPkg/` 或 `GenoaBoard/OnyxBoardPkg/` 的目錄骨架；AGESA 部分改接 AMD 提供的 V3000 (Embedded/Client) PI | 改 `PLATFORM_GUID`、`PLATFORM_NAME`、`.fdf` 的 FV 佈局、PCD；務必向 AMD 取得 Embedded AGESA 取代 upstream 的 NULL instance（見 `Platform/AMD/ServerBoard.md`）。SP5 vs. FP7/FP8 腳位、SMBUS、GPIO、記憶體拓撲全部不同，需整套重做 |
-| 一般新主機板（非 AMD） | `Platform/ARM/JunoPkg/`、`Platform/Marvell/Armada70x0Db/`、`Platform/RaspberryPi/*` 擇一 | 必改 PLATFORM/PACKAGE GUID、`OUTPUT_DIRECTORY`、所有 Library/PCD override |
-| 新 SoC/晶片 Silicon Pkg | `Silicon/Marvell/Armada7k8k/`、`Silicon/NXP/LX2160A/` | 僅放可被多板共用程式；板差用 PCD/Library 抽象 |
-| **PCIe root bridge 宣告（V3000 必做）** | `Platform/AMD/AgesaModulePkg/Library/DxeAmdPciHostBridgeLib/PciHostBridgeLib.c/.inf` | 給 `PciBusDxe` 用；TH5 由此被列舉。設定好 bus/IO/MMIO 範圍即可 |
-| 新 UEFI DXE 驅動（Driver Binding 模型） | `Drivers/ASIX/Bus/Usb/UsbNetworking/Ax88179/`（四件組：Driver entry、DriverBinding、ComponentName、Protocol 實作） | `.inf` 的 `[Protocols]` 正確列 produced/consumed；Switch ASIC 的 UEFI 驅動**通常不需要**，除非要在 UEFI 期走 switch 的管理口 PXE |
-| 新 UEFI 應用程式（.efi） | `Drivers/OptionRomPkg/Application/BltLibSample/` | `MODULE_TYPE = UEFI_APPLICATION` |
-| 新 Library（給其他模組 link） | `Drivers/OptionRomPkg/Library/FrameBufferBltLib/`、`Features/Intel/Debugging/BeepDebugFeaturePkg/Library/BeepLib/`（含 `BeepLibNull`） | 一併提供 `*Null` 版本以便關閉 feature |
-| 新 Feature Pkg | `Features/Intel/UserInterface/LogoFeaturePkg/`、`Features/Intel/PowerManagement/S3FeaturePkg/` | 必備 `Include/{Feature}.dsc`、`Include/PreMemory.fdf`、`Include/PostMemory.fdf` |
-| 新 ACPI 表 / SSDT | `Features/Intel/OutOfBandManagement/IpmiFeaturePkg/BmcAcpi/BmcSsdt/BmcSsdt.asl` + `BmcAcpi.c` | 用 `InstallAcpiTable` 載入；TH5 可考慮用 ACPI DSD 讓 OS 辨識其用途 |
-| 新 SMBIOS Type | `Features/Intel/SystemInformation/SmbiosFeaturePkg/SmbiosBasicDxe/Type2BaseBoardManufacturerFunction.c` | 每個 Type 一個 `.c`，在 `SmbiosBasicEntryPoint.c` 註冊 |
-| 新檔案系統驅動（參考） | `Features/Ext4Pkg/Ext4Dxe/` | 產生 `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL` |
+| 板級骨架 | `Platform/AMD/TurinBoard/OnyxBoardPkg/{Project.dsc,Project.fdf,Include/}` | 改 PLATFORM_GUID、PACKAGE_GUID、OUTPUT_DIRECTORY；AGESA include 從 SP5 換成 V3000（需 AMD 提供） |
+| MinPlatform 整合 | `Platform/AMD/AmdMinBoardPkg/AmdMinBoardPkg.inc.dsc`、`AmdMinBoardPkg.ci.yaml` | 新板的 CI yaml 直接複製調整 |
+| PCIe root bridge | `Platform/AMD/AgesaModulePkg/Library/DxeAmdPciHostBridgeLib/PciHostBridgeLib.c/.inf` | 告訴 PciBusDxe 要掃哪些 segment / bus；TH5 所在的 root port 必列入 |
+| ACPI DSDT 樣式 | `Platform/Ampere/JadePkg/Drivers/AcpiPlatformDxe/*.c` + `Features/Intel/OutOfBandManagement/IpmiFeaturePkg/BmcAcpi/BmcSsdt/BmcSsdt.asl` | TH5 以 `_DSD` 附加 vendor properties，便於 OS 層 SDK 識別 |
+| 板級 BDS 客製 | `Platform/AMD/AmdMinBoardPkg/Library/`（找 BoardBdsHookLib） | BootOrder、HII |
+| UEFI PXE 驅動範例 | `Drivers/OptionRomPkg/UndiRuntimeDxe/`、`Drivers/ASIX/Bus/Usb/UsbNetworking/Ax88179/` | 僅若要 UEFI 階段 PXE；多數 switch 專案不需要 |
+| SMBIOS Type | `Features/Intel/SystemInformation/SmbiosFeaturePkg/SmbiosBasicDxe/Type*Function.c` | 新增 Type 9（PCIe slot：TH5）、Type 41（On-board device） |
+| HII Setup 選單 | `Features/Intel/UserInterface/UserAuthFeaturePkg/UserAuthenticationDxeSmm/UserAuthenticationDxeVfr.vfr` | 參考 VFR / Formset 寫 BoardConfigDxe |
+
+---
+
+## 3. 功能工單清單（GitHub Issues）
+
+> 下列 18 張工單對應「要新增/修改的所有功能」。每張皆附標題、Labels、描述、驗收條件、依賴；可直接複製貼到 GitHub Issue。Milestones 以 Epic 分組。
+
+### Epic 分組
+- **Epic A**：Board bring-up（5 張）— 讓板子能進 DXE
+- **Epic B**：PCIe & TH5 整合（4 張）— OS 能看到並使用 TH5
+- **Epic C**：Boot / 網路（3 張）— BootOrder、管理口 PXE、更新流程
+- **Epic D**：可觀測性 & 管理（3 張）— SMBIOS、ACPI、日誌
+- **Epic E**：品質 / CI（3 張）— 建置、靜態檢查、禁用字
+
+### 工單樣板
+```
+Title: [領域] 一句話說明
+Labels: epic:A|B|C|D|E, area:platform|silicon|features|ci, type:feat|chore|fix, priority:P0|P1|P2
+Milestone: V3000-TH5 bring-up M1 | M2 | M3
+Assignees: TBD
+Linked PRs: —
+
+## 背景
+（為什麼要做；對 V3000+TH5 專案的意義）
+
+## 範圍
+- 新增 / 修改的路徑
+- 不處理什麼
+
+## 設計要點
+- 介面 / 依賴 / 配置
+
+## 驗收條件 (Definition of Done)
+- [ ] ...
+
+## 依賴
+- #xx, #yy
+
+## 風險 / 備註
+```
+
+---
+
+### 🅰️ Epic A：Board bring-up
+
+#### #A1 建立 `Platform/AMD/EmbeddedV3000Board/Th5SwitchBoardPkg` 骨架
+**Labels**：`epic:A, area:platform, type:feat, priority:P0`
+**背景**：repo 無 V3000 Board Pkg，需從頭建立。
+**範圍**：新增 `Th5SwitchBoardPkg.dec/.dsc/.fdf`、`Include/Dsc/ProjectPcd.dsc`、`Include/Fdf/FlashMapInclude.fdf`。照抄 `Platform/AMD/TurinBoard/OnyxBoardPkg/`。
+**驗收**：`build -a X64 -t GCC -p .../Project.dsc` 僅以 NULL AGESA 也能跑到 link 階段。CI 加入該 .dsc。
+**依賴**：—
+
+#### #A2 導入 V3000 Embedded AGESA（Blob 介接）
+**Labels**：`epic:A, area:silicon, type:feat, priority:P0`
+**背景**：upstream 只有 NULL instance（見 `Platform/AMD/ServerBoard.md`）；V3000 需 Embedded PI，須向 AMD 取得。
+**範圍**：`Silicon/AMD/EmbeddedV3000Pkg/`、`Th5SwitchBoardPkg/Binaries/Agesa/`。
+**驗收**：AGESA PEI/DXE 模組被 FV 包入；PEI phase 能印出 CPU/記憶體 init 訊息。
+**依賴**：#A1、外部 AMD NDA
+**風險**：若 AMD 不授權，整個專案阻擋。
+
+#### #A3 BoardInitLib：GPIO / 時脈 / PERST#
+**Labels**：`epic:A, area:platform, type:feat, priority:P0`
+**範圍**：`Th5SwitchBoardPkg/Library/BoardInitLib/`。
+**驗收**：TH5 在 DXE 開始前已被 release from reset，PCIe 參考時脈 enable；GPIO log 顯示狀態。
+**依賴**：#A1、#A2
+
+#### #A4 PlatformHookLib：UART / 偵錯埠
+**Labels**：`epic:A, area:platform, type:feat, priority:P0`
+**範圍**：`Th5SwitchBoardPkg/Library/PlatformHookLib/`。
+**驗收**：115200 8N1 可見 `DEBUG` 輸出；SPCR ACPI 指向同一埠。
+**依賴**：#A1
+
+#### #A5 Flash Layout 與 FV 分配（FDF）
+**Labels**：`epic:A, area:platform, type:feat, priority:P1`
+**範圍**：`Project.fdf`、`Include/Fdf/FlashMapInclude.fdf`；劃分 `FV_BB`、`FV_MAIN`、`FV_FTW`、NVRAM。
+**驗收**：映像大小符合 SPI Flash；fault-tolerant write 可用；`FvMainCompact` 可壓縮。
+**依賴**：#A1
+
+### 🅱️ Epic B：PCIe & TH5 整合
+
+#### #B1 V3000 PciHostBridgeLib：宣告 TH5 所在 root bridge
+**Labels**：`epic:B, area:platform, type:feat, priority:P0`
+**背景**：`edk2/MdeModulePkg/.../PciBusDxe` 靠此 Library 列舉 TH5。
+**範圍**：`Th5SwitchBoardPkg/Library/PciHostBridgeLib/`，照抄 `Platform/AMD/AgesaModulePkg/Library/DxeAmdPciHostBridgeLib/`。
+**驗收**：`pci` UEFI shell 指令可看到 TH5 (Broadcom VID 0x14E4) 與其 BAR 分配完整。
+**依賴**：#A2
+
+#### #B2 Th5PreInitDxe：讀取 SKU / MAC base EEPROM
+**Labels**：`epic:B, area:platform, type:feat, priority:P1`
+**範圍**：`Th5SwitchBoardPkg/Drivers/Th5PreInitDxe/`。SMBus 讀 EEPROM → 存成 HOB / PCD / SetVariable。
+**驗收**：OS 可從 ACPI `_DSD` 或 UEFI variable 讀到 MAC base。
+**依賴**：#B1
+**不處理**：不做 TH5 switching 初始化；僅讀資料與驗證存在。
+
+#### #B3 ACPI SSDT：TH5 節點（`_HID`/`_CRS`/`_DSD`）
+**Labels**：`epic:B, area:platform, type:feat, priority:P1`
+**範圍**：`Th5SwitchBoardPkg/AcpiTables/Ssdt/Th5.asl`。
+**驗收**：Linux `lspci -vv` 顯示裝置；OS 的 Broadcom SDK/驅動能依 ACPI 綁定。
+**依賴**：#B1
+
+#### #B4 MCFG / MADT / SPCR 更新
+**Labels**：`epic:B, area:platform, type:feat, priority:P1`
+**範圍**：`Th5SwitchBoardPkg/AcpiTables/Platform.aslc` 或動態表（`Platform/AMD/AmdPlatformPkg/DynamicTables`）。
+**驗收**：OS 看到正確 PCIe segment、APIC、serial。
+**依賴**：#B1、#A4
+
+### 🅲 Epic C：Boot / 網路
+
+#### #C1 BoardBdsHookLib：BootOrder 客製
+**Labels**：`epic:C, area:platform, type:feat, priority:P1`
+**範圍**：`Th5SwitchBoardPkg/Library/BoardBdsHookLib/`。預設優先 NVMe → 管理口 PXE → USB。
+**驗收**：第一次開機 BootOrder 符合規格；`efibootmgr` 一致。
+**依賴**：#A1
+
+#### #C2 管理口 UEFI PXE / HTTP Boot
+**Labels**：`epic:C, area:features, type:feat, priority:P2`
+**範圍**：啟用 `NetworkPkg`（來自上游 edk2）、`Features/Intel/Network/NetworkFeaturePkg`，驗證 NIC UNDI 可用。
+**驗收**：PXE 可開 Linux installer / NOS image。
+**依賴**：#B1
+**備註**：若產品不走 UEFI PXE，可降為 P3 或關閉。
+
+#### #C3 Capsule Update 支援（BIOS 更新）
+**Labels**：`epic:C, area:features, type:feat, priority:P2`
+**範圍**：引入 `FmpDevicePkg`、`SignedCapsulePkg`（上游 edk2），於 `Project.dsc` 配置。
+**驗收**：`fwupdmgr` 或 UEFI capsule 工具可成功更新 BIOS。
+**依賴**：#A5
+
+### 🅳 Epic D：可觀測性 & 管理
+
+#### #D1 SMBIOS：Type 9/41 for TH5
+**Labels**：`epic:D, area:features, type:feat, priority:P2`
+**範圍**：fork `Features/Intel/SystemInformation/SmbiosFeaturePkg/SmbiosBasicDxe/` 相關 Type 函式。
+**驗收**：`dmidecode` 可見 TH5 條目（slot、on-board device）。
+**依賴**：#B1
+
+#### #D2 (可選) IPMI / OOB 整合
+**Labels**：`epic:D, area:features, type:feat, priority:P3`
+**範圍**：若產品含 BMC，啟用 `Features/Intel/OutOfBandManagement/IpmiFeaturePkg`。
+**驗收**：BMC 可讀 POST code 與 SEL。
+**依賴**：—
+
+#### #D3 Status Code / DEBUG 日誌策略
+**Labels**：`epic:D, area:platform, type:chore, priority:P2`
+**範圍**：`Project.dsc` 的 `PCD DEBUG_PRINT_ERROR_LEVEL`、`StatusCodeHandler`。
+**驗收**：RELEASE build 無冗餘日誌；DEBUG build 有完整 PEI/DXE 軌跡。
+**依賴**：#A4
+
+### 🅴 Epic E：品質 / CI
+
+#### #E1 新增 CI：多平台 build 矩陣
+**Labels**：`epic:E, area:ci, type:chore, priority:P0`
+**範圍**：GitHub Actions / stuart_ci_build；至少 build `Th5SwitchBoardPkg/Project.dsc` DEBUG + RELEASE。
+**驗收**：每個 PR 綠燈才可合併。
+**依賴**：#A1
+
+#### #E2 依賴邊界掃描
+**Labels**：`epic:E, area:ci, type:chore, priority:P1`
+**範圍**：Python 腳本掃所有 `.inf` 的 `[Packages]`；禁止 `Silicon/*/*.inf` 引用 `Platform/*.dec`。
+**驗收**：違規即 CI 失敗，附明確錯誤訊息。
+**依賴**：#E1
+
+#### #E3 Switch 禁用字 / 層界違規檢查
+**Labels**：`epic:E, area:ci, type:chore, priority:P1`
+**範圍**：grep `fdb|vlan_add|stp_|lacp_|netlink|sai_` 於 `Platform/AMD/EmbeddedV3000Board/` 底下；命中即失敗。
+**驗收**：防止 OS 層邏輯誤寫入 UEFI。
+**依賴**：#E1
+
+### 工單依賴總圖
+```
+#A1 ──┬─> #A3 ──┐
+      ├─> #A4 ──┤
+      ├─> #A5 ──┤──> #C3
+      ├─> #C1    
+      └─> #E1 ──> #E2, #E3
+#A2 ──> #A3 ──> #B1 ──┬─> #B2 ──> #D1
+                     ├─> #B3
+                     ├─> #B4
+                     └─> #C2
+#D2, #D3 獨立
+```
+
+---
+
+## 4. 範本檔案（速查）
+
+| 要新增什麼 | 照抄哪個檔案 | 注意事項 |
+|---|---|---|
+| V3000 新主機板 | `Platform/AMD/TurinBoard/OnyxBoardPkg/` 目錄骨架 | 改所有 GUID；AGESA 改接 V3000 Embedded PI |
+| PCIe root bridge | `Platform/AMD/AgesaModulePkg/Library/DxeAmdPciHostBridgeLib/PciHostBridgeLib.c/.inf` | TH5 所在 segment 必列入 |
+| DXE 驅動（Driver Binding） | `Drivers/ASIX/Bus/Usb/UsbNetworking/Ax88179/`（四件組：Entry、DriverBinding、ComponentName、Protocol） | switch 專案多半不需寫 TH5 UEFI driver |
+| Library + Null 版本 | `Features/Intel/Debugging/BeepDebugFeaturePkg/Library/BeepLib/BeepLibNull.*` | 讓 feature 可關閉 |
+| Feature Pkg | `Features/Intel/UserInterface/LogoFeaturePkg/` | 需提供 `Include/*.dsc`、`PreMemory.fdf`、`PostMemory.fdf` |
+| ACPI SSDT | `Features/Intel/OutOfBandManagement/IpmiFeaturePkg/BmcAcpi/BmcSsdt/BmcSsdt.asl` + `BmcAcpi.c` | 用 `InstallAcpiTable` 載入 |
+| SMBIOS Type | `Features/Intel/SystemInformation/SmbiosFeaturePkg/SmbiosBasicDxe/Type*Function.c` | 每 Type 一 `.c`，於 EntryPoint 註冊 |
+| HII Setup | `Features/Intel/UserInterface/UserAuthFeaturePkg/UserAuthenticationDxeSmm/UserAuthenticationDxeVfr.vfr` | VFR + Formset |
+| 檔案系統驅動 | `Features/Ext4Pkg/Ext4Dxe/` | 產生 `EFI_SIMPLE_FILE_SYSTEM_PROTOCOL` |
+
+---
 
 ## 5. 本專案適用的開發規則
 
-> 目標：讓未來寫出來的程式能進得了 upstream，也能被 switch 產品量產 BIOS 採用。
+1. **分層依賴單向**：Platform → Silicon/Drivers/Features → edk2 核心；反向禁止（由 #E2 自動擋）。
+2. **每模組必備三件組**：`Xxx.c`、`Xxx.inf`、必要時 `Xxx.uni`。缺 `.inf` 不會被編譯。
+3. **命名**：型別 `UPPER_CASE_UNDERSCORE`；函式/變數 PascalCase；全域 `g` 前綴；`.inf` 內 `MODULE_TYPE` 必填（`DXE_DRIVER`、`PEIM`、`UEFI_APPLICATION`、`DXE_RUNTIME_DRIVER`…）。
+4. **Protocol/PPI/GUID** 必須在 `.dec` 的對應區塊註冊後才能被 `.inf` 引用。
+5. **PCD 抽離板差**：V3000 的 PCIe 範圍、TH5 bus/segment、GPIO 編號**全部**透過 PCD 或 Library 傳入，不寫死在 Silicon 原始碼。
+6. **UEFI Driver Model**：產生/消耗 Protocol 的驅動必有 `DriverBinding.c`（Supported/Start/Stop）與 `ComponentName.c`。
+7. **Library 提供 Null 版本**（可短路 feature）。
+8. **錯誤處理**：所有 `EFI_STATUS` 函式一路回傳狀態；失敗反向釋放；`ASSERT` 只用於內部不可能狀態。
+9. **檔案長度建議**：`.c` < 1500 行、函式 < 200 行（由 #E3 擴充檢查）。
+10. **授權表頭**：每新檔含 SPDX `BSD-2-Clause-Patent` 與 Copyright。
+11. **測試**：UEFI 無 host-side unit test；驗證走實機 + QEMU (`Platform/Qemu/*`)。
+12. **Switch 功能不得混進 UEFI**：L2/L3 轉發、VLAN、STP、ACL、SNMP 等禁止；由 #E3 CI 擋。
+13. **AGESA 來源**：V3000 Embedded PI 向 AMD 取得；upstream 的 NULL instance 僅供空編譯。
 
-1. **分層依賴單向**：Platform → Silicon/Drivers/Features → edk2 核心；反向禁止。
-2. **每模組必備三件組**：`Xxx.c`（或多個）、`Xxx.inf`（宣告 sources/packages/libraryclasses/protocols/guids/pcd）、必要時 `Xxx.uni`。缺 `.inf` 的 C 檔不會被編譯。
-3. **命名慣例**：型別 `UPPER_CASE_WITH_UNDERSCORES`；函式/變數 PascalCase；全域 `g` 前綴；`.inf` 內 `MODULE_TYPE` 必填（`DXE_DRIVER`、`UEFI_APPLICATION`、`PEIM`、`DXE_SMM_DRIVER`、`UEFI_DRIVER`…）。
-4. **Protocol/PPI/GUID** 都要有唯一 GUID 並在 `.dec` 的 `[Guids]/[Protocols]/[Ppis]` 註冊後才能被 `.inf` 引用。
-5. **PCD 抽離板差**：不要在 Silicon 原始碼寫死位址/時脈/GPIO/PCIe 範圍；由 `Platform/{Board}Pkg/*.dsc` 覆寫。V3000 板的 PCIe 配置、TH5 所在 bus/segment 都應透過 PCD 或 `PciHostBridgeLib` 傳入。
-6. **UEFI Driver Model**：產生/消耗 Protocol 的驅動要實作 `DriverBinding.c`（Supported/Start/Stop）與 `ComponentName.c`，範本 `Drivers/ASIX/.../Ax88179/`。
-7. **Library 提供 Null 版本**（可短路 feature），例：`Features/Intel/Debugging/BeepDebugFeaturePkg/Library/BeepLib/BeepLibNull.*`。
-8. **錯誤處理**：所有返回 `EFI_STATUS` 的函式一路回傳狀態；失敗路徑反向釋放資源（記憶體、Event、Protocol）。`ASSERT` 只用於內部不可能狀態，不處理外部輸入。
-9. **檔案長度建議** `.c` < 1500 行（例：`Silicon/Marvell/Drivers/Net/Pp2Dxe/Mvpp2Lib.c` 已偏大），超過時拆檔。目前**未自動檢查**。
-10. **授權表頭**：每個新檔案開頭 SPDX `BSD-2-Clause-Patent` 與 Copyright，與 `License.txt` 一致。
-11. **沒有單元測試文化**：UEFI 模組通常無 host-side unit test；驗證走實機或 QEMU 開機。新模組應提供 QEMU 或 `Platform/Qemu/*` 建置目標以便審查。
-12. **Switch 功能不得混進 UEFI**：L2/L3 轉發、VLAN、STP、ACL 等**嚴禁**塞進 DXE 驅動；UEFI 僅負責 PCIe 列舉與必要的 ACPI 描述。這條對本次 V3000+TH5 專案特別重要。
-13. **AGESA 來源**：AMD 板的實際可開機 AGESA 必須向 AMD 取得；upstream 的是 NULL instance（見 `Platform/AMD/ServerBoard.md`）。V3000 需要 Embedded/Client PI，不是 EPYC SP5 的那份。
+---
 
 ## 6. 機器檢查
 
-### 已設定
-- `build`（EDK II 編譯器前端）會驗證 `.inf/.dsc/.fdf` 一致性、Library 解析、PCD 覆寫，是最實際的結構檢查。
+### 已設定（repo 現狀）
+- `build`（EDK II 編譯器前端）驗證 `.inf/.dsc/.fdf` 一致性與 Library 解析。
+- `AmdMinBoardPkg.ci.yaml`、`AmdPlatformPkg.ci.yaml` 顯示 AMD 子樹已有 stuart CI 樣板，可沿用。
 - `CODEOWNERS` / `REVIEWERS` 指派審查者。
-- 授權檔：`License.txt`、`License-History.txt`。
+- 授權：`License.txt`、`License-History.txt`。
 
-### 待設定（repo 內目前無對應設定檔，建議補）
+### 待設定（對應工單 #E1–#E3 與一般化檢查）
 
-| 檢查 | 工具 / 指令 | 目的 |
-|---|---|---|
-| 提交/碼風格 | `python edk2/BaseTools/Scripts/PatchCheck.py HEAD~1..HEAD` | commit message 與 patch 的 EDK II 風格 |
-| 程式碼格式 | `uncrustify -c edk2/.pytool/Plugin/UncrustifyCheck/uncrustify.cfg -F files.txt` | 統一 C 檔格式 |
-| 靜態風格 | ECC（`edk2/BaseTools/Source/Python/Ecc/`） | 命名、include、Protocol/GUID 一致性 |
-| 多平台建置矩陣 | GitHub Actions / `stuart_ci_build` | 每個 `Platform/*/*.dsc` CI 內 build（DEBUG + RELEASE） |
-| 檔案大小門檻 | 自訂腳本 + `wc -l` | 警告 `.c` > 1500 行、函式 > 200 行 |
-| 依賴邊界 | 自訂腳本：掃 `.inf` 的 `[Packages]` | 禁止 `Silicon/*/*.inf` 引用 `Platform/*.dec` |
-| SPDX / 版權 | `reuse lint` 或自訂 grep | 保證每個新檔案含正確授權頭 |
-| **Switch 專案額外**：禁用字檢查 | 自訂腳本 grep `fdb|vlan_add|stp_|lacp_` 於 `Platform/{Vendor}/{V3000Board}/` | 避免有人把 switch control plane 誤塞進 UEFI |
+| 檢查 | 工具 / 指令 | 目的 | 工單 |
+|---|---|---|---|
+| 提交/碼風格 | `python edk2/BaseTools/Scripts/PatchCheck.py HEAD~1..HEAD` | EDK II commit/patch 風格 | #E1 延伸 |
+| 格式 | `uncrustify -c edk2/.pytool/Plugin/UncrustifyCheck/uncrustify.cfg` | 統一 C 格式 | #E1 |
+| 靜態風格 | ECC（`edk2/BaseTools/Source/Python/Ecc/`） | 命名 / include / GUID 一致性 | #E1 |
+| 多平台 build 矩陣 | GitHub Actions / `stuart_ci_build` | 每 PR 保證各 .dsc build 過 | **#E1** |
+| 依賴邊界 | 掃 `.inf` 的 `[Packages]` | Silicon 不可依賴 Platform | **#E2** |
+| Switch 禁用字 | grep `fdb|vlan_add|stp_|lacp_|netlink|sai_` | 防 OS 層邏輯寫入 UEFI | **#E3** |
+| 檔案大小門檻 | `wc -l` + 腳本 | .c < 1500、函式 < 200 | #E3 延伸 |
+| SPDX / 版權 | `reuse lint` 或 grep | 授權頭正確 | #E1 延伸 |
 
-> 若要把本 repo 作為 V3000 + TH5 switch 產品的 UEFI 層，建議至少把「多平台建置矩陣」、「依賴邊界」、「Switch 禁用字檢查」設成必過，否則很容易在不同 board 間互污染或誤把 OS 層邏輯寫進 UEFI。
+> 本架構文件成立後，先開 #A1、#A2、#E1 三張工單進 M1；AGESA（#A2）取得時程是整個專案的最大風險，應優先鎖定。
