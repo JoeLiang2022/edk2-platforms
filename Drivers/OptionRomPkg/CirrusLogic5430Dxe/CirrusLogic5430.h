@@ -182,13 +182,15 @@ CirrusLogic5430ControllerDriverSupported (
   );
 
 /**
-  TODO: Add function description
+  Start this driver on ControllerHandle by opening the PCI I/O protocol for the
+  Cirrus Logic 5430 controller and producing a graphics output protocol.
 
-  @param  This TODO: add argument description
-  @param  Controller TODO: add argument description
-  @param  RemainingDevicePath TODO: add argument description
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              The handle of the controller to start.
+  @param  RemainingDevicePath     A pointer to the remaining portion of a device path.
 
-  TODO: add return values
+  @retval EFI_SUCCESS             Driver is started successfully.
+  @retval EFI_OUT_OF_RESOURCES    Failed to allocate required memory or resources.
 
 **/
 EFI_STATUS
@@ -200,14 +202,15 @@ CirrusLogic5430ControllerDriverStart (
   );
 
 /**
-  TODO: Add function description
+  Stop this driver on ControllerHandle by removing the graphics output protocol and closing
+  the PCI I/O protocol for the Cirrus Logic 5430 controller.
 
-  @param  This TODO: add argument description
-  @param  Controller TODO: add argument description
-  @param  NumberOfChildren TODO: add argument description
-  @param  ChildHandleBuffer TODO: add argument description
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              A handle to the device being stopped.
+  @param  NumberOfChildren        The number of child device handles in ChildHandleBuffer.
+  @param  ChildHandleBuffer       An array of child handles to be freed.
 
-  TODO: add return values
+  @retval EFI_SUCCESS             Driver is stopped successfully.
 
 **/
 EFI_STATUS
