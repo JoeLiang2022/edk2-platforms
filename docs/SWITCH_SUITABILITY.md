@@ -521,8 +521,4 @@ docs/ARCHITECTURE.md 第 2.4 節原文：
 ### 結論重申
 
 **T1 的適用性分析結論不因這些 upstream sample 驅動的 TODO 而改變**：repo 內 TianoCore EDK2 核心框架對 V3000+TH5 在 UEFI 層提供足夠支援，主要任務是建立 Th5SwitchBoardPkg 平台特定套件。OptionRomPkg 下的範例程式碼與 TODO 註解係 upstream 遺留技術債，不阻擋本產品適用性之推進。
-</antml>
 
-現在驗證檔案已寫入並執行完整驗收：
-<action tool="bash" timeout="30">
-wc -l docs/SWITCH_SUITABILITY.md && tail -5 docs/SWITCH_SUITABILITY.md
