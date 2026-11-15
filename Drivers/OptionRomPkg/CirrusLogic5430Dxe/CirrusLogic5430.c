@@ -546,13 +546,11 @@ CirrusLogic5430ControllerDriverStop (
 }
 
 /**
-  TODO: Add function description
+  Write an 8-bit value to a Cirrus Logic 5430 I/O port.
 
-  @param  Private TODO: add argument description
-  @param  Address TODO: add argument description
-  @param  Data TODO: add argument description
-
-  TODO: add return values
+  @param  Private                 Pointer to the driver private data structure.
+  @param  Address                 The I/O port address to write to.
+  @param  Data                    The 8-bit value to write.
 
 **/
 VOID
