@@ -164,14 +164,27 @@ CirrusLogic5430GraphicsOutputDestructor (
 // EFI_DRIVER_BINDING_PROTOCOL Protocol Interface
 //
 /**
-  TODO: Add function description
+  Test to see if this driver supports a given controller. If a child device node is returned,
+  it then gets added as a child of the controller.
 
-  @param  This TODO: add argument description
-  @param  Controller TODO: add argument description
-  @param  RemainingDevicePath TODO: add argument description
+  @param  This                    A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
+  @param  Controller              The handle of the controller to test.
+  @param  RemainingDevicePath     A pointer to the remaining portion of a device path.  This
+                                  parameter is ignored by device drivers, and is optional for
+                                  bus drivers. For bus drivers, if this parameter is not NULL,
+                                  then the bus driver must determine if the bus controller on
+                                  a given handle can support a child controller on the device path
+                                  that is being probed.
 
-  TODO: add return values
-
+  @retval EFI_SUCCESS             The device specified by ControllerHandle and RemainingDevicePath is
+                                  supported by the driver specified by This.
+  @retval EFI_ALREADY_STARTED     The device specified by ControllerHandle and RemainingDevicePath is
+                                  already being managed by the driver specified by This.
+  @retval EFI_ACCESS_DENIED       The device specified by ControllerHandle and RemainingDevicePath is
+                                  already being managed by a different driver or an application that
+                                  requires exclusive access. Currently not implemented.
+  @retval EFI_UNSUPPORTED         The device specified by ControllerHandle and RemainingDevicePath is
+                                  not supported by the driver specified by This.
 **/
 EFI_STATUS
 EFIAPI
